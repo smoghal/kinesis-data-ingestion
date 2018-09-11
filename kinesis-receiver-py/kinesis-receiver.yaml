@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Kinesis Data Stream and Receiver Lambda Definition Stack
+
+Parameters:
+  ArtificatS3Bucket:
+    Type: String
+    Description: S3 Bucket where Lambda artifacts are stored
+  LambdaZipFile:
+    Type: String
+    Description: Zip file name in S3 Bucket referenced by ArtificatS3Bucket
+  TrustAccount:
+    Type: String
+    Description: Account to trust which sends data to this KinesisStreamName stream
+  KinesisStreamName:
+    Type: String
+    Description: Kinesis Stream Name
+  KinesisStreamRetentionHours:
+    Type: Number
+    Description: Total number of hours records are kept in the stream
+  KinesisStreamShardCount:
+    Type: Number
+    Description: Kinesis Stream total number of shared
+  KinesisStreamEnv:
+    Type: String
+    Description: Kinesis Stream Environment Tag
+  EventSourceBatchSize:
+    Type: Number
+    Description: Number of records Lambda function receives in batches from Kinesis Stream Event Soruce
+
+Resources:
+
+  # Create a role that allows Lambda in TrustAccount to send data to
+  # Kinesis stream in this account
+  KinesisCrossAccountTrustRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonKinesisFullAccess"
+      AssumeRolePolicyDocument:
+        Statement:
+          - 
+            Effect: "Allow"
+            Principal:
+              AWS:
+              - !Sub "arn:aws:iam::${TrustAccount}:root"
+            Action:
+              - "sts:AssumeRole"
+      Policies: 
+        - 
+          PolicyName: "AssumeRoleInlinePolicy"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: "Allow"
+                Action:
+                  - "sts:AssumeRole"
+                Resource: "*"
+
+  # Creates a role that allows Lambda to read data from Kinesis stream
+  # and send data to another Kinesis stream in a different account
+  KinesisReceiverRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole"
+      AssumeRolePolicyDocument:
+        Statement:
+          - 
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies: 
+        - 
+          PolicyName: "AssumeRoleInlinePolicy"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: "Allow"
+                Action:
+                  - "sts:AssumeRole"
+                Resource: "*"
+
+  # Creates Kinesis data stream with 1 shard
+  ReceiverStream:
+    Type: "AWS::Kinesis::Stream"
+    Properties:
+      Name: !Ref "KinesisStreamName"
+      # 7 days retention
+      RetentionPeriodHours: !Ref "KinesisStreamRetentionHours"
+      ShardCount: !Ref "KinesisStreamShardCount"
+      # StreamEncryption:
+      #     EncryptionType: KMS
+      #     KeyId: !Ref myKey
+      Tags:
+        -
+          Key: "Environment"
+          Value: !Ref "KinesisStreamEnv"
+
+  # Creates Lambda function that listens to events from Kinesis data stream above
+  KinesisReceiverFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "kinesis-receiver-lambda.lambda_handler"
+      Runtime: python3.6
+      Code:
+        S3Bucket: !Ref "ArtificatS3Bucket"
+        S3Key: !Ref "LambdaZipFile"
+      Role: !GetAtt "KinesisReceiverRole.Arn"
+      Timeout: 60
+  
+  # Use Kinesis stream as Lambda Source event
+  KinesisReceiverEventSourceMapping:
+    Type: "AWS::Lambda::EventSourceMapping"
+    Properties:
+      BatchSize: !Ref "EventSourceBatchSize"
+      Enabled: True
+      EventSourceArn: !GetAtt "ReceiverStream.Arn"
+      FunctionName: !GetAtt "KinesisReceiverFunction.Arn"
+      StartingPosition: "TRIM_HORIZON"
+
+Outputs:
+  ReceiverStreamId:
+    Value: !Ref "ReceiverStream"
+    Export:
+      Name: !Sub "${AWS::StackName}::ReceiverStream::Id"
+  KinesisReceiverFunctionId:
+    Value: !Ref "KinesisReceiverFunction"
+    Export:
+      Name: !Sub "${AWS::StackName}::KinesisReceiverFunction::Id"
+  KinesisReceiverRoleArn:
+    Value: !GetAtt "KinesisReceiverRole.Arn"
+    Export:
+      Name: !Sub "${AWS::StackName}::KinesisReceiverRole::Arn"
+  KinesisCrossAccountRoleArn:
+    Value: !GetAtt "KinesisCrossAccountTrustRole.Arn"
+    Export:
+      Name: !Sub "${AWS::StackName}::KinesisCrossAccountRole::Arn"

@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Kinesis Data Stream and Forwarder Lambda Definition Stack
+
+Parameters:
+  ArtificatS3Bucket:
+    Type: String
+    Description: S3 Bucket where Lambda artifacts are stored
+  LambdaZipFile:
+    Type: String
+    Description: Zip file name in S3 Bucket referenced by ArtificatS3Bucket
+  CrossAccountRoleArn:
+    Type: String
+    Description: Cross Account Role ARN that Lambda must assume to send data to target Kinesis stream
+  ForwardToStreamName:
+    Type: String
+    Description: Lambda will forward records to this target stream
+  KinesisStreamName:
+    Type: String
+    Description: Kinesis Stream Name
+  KinesisStreamRetentionHours:
+    Type: Number
+    Description: Total number of hours records are kept in the stream
+  KinesisStreamShardCount:
+    Type: Number
+    Description: Kinesis Stream total number of shared
+  KinesisStreamEnv:
+    Type: String
+    Description: Kinesis Stream Environment Tag
+  EventSourceBatchSize:
+    Type: Number
+    Description: Number of records Lambda function receives in batches from Kinesis Stream Event Soruce
+
+Resources:
+
+  # Creates a role that allows Lambda to read data from Kinesis stream
+  # and send data to another Kinesis stream in a different account
+  KinesisForwarderRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies: 
+        - 
+          PolicyName: "AssumeRoleInlinePolicy"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: "Allow"
+                Action:
+                  - "sts:AssumeRole"
+                Resource: "*"
+
+  # Creates Kinesis data stream with 1 shard
+  SourceStream:
+    Type: "AWS::Kinesis::Stream"
+    Properties:
+      Name: !Ref "KinesisStreamName"
+      # 7 days retention
+      RetentionPeriodHours: !Ref "KinesisStreamRetentionHours"
+      ShardCount: !Ref "KinesisStreamShardCount"
+      # StreamEncryption:
+      #     EncryptionType: KMS
+      #     KeyId: !Ref myKey
+      Tags:
+      -
+        Key: "Environment"
+        Value: !Ref "KinesisStreamEnv"
+
+  # Creates Lambda function that listens to events from Kinesis data stream above
+  KinesisForwarderFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Handler: "kinesis-forwarder-lambda.lambda_handler"
+      Runtime: python3.6
+      Code:
+        S3Bucket: !Ref "ArtificatS3Bucket"
+        S3Key: !Ref "LambdaZipFile"
+      Role: !GetAtt "KinesisForwarderRole.Arn"
+      Timeout: 60
+      Environment:
+        Variables:
+          cross_account_role: !Ref "CrossAccountRoleArn"
+          forward_to_stream_name: !Ref "ForwardToStreamName"
+  
+  # Use Kinesis stream as Lambda Source event
+  KinesisForwarderEventSourceMapping:
+    Type: "AWS::Lambda::EventSourceMapping"
+    Properties:
+      BatchSize: !Ref "EventSourceBatchSize"
+      Enabled: True
+      EventSourceArn: !GetAtt "SourceStream.Arn"
+      FunctionName: !GetAtt "KinesisForwarderFunction.Arn"
+      StartingPosition: "TRIM_HORIZON"
+
+Outputs:
+  SourceStreamId:
+    Value: !Ref "SourceStream"
+    Export:
+      Name: !Sub "${AWS::StackName}::SourceStream::Id"
+  KinesisForwarderFunctionId:
+    Value: !Ref "KinesisForwarderFunction"
+    Export:
+      Name: !Sub "${AWS::StackName}::KinesisForwarderFunction::Id"
+  KinesisForwarderRoleArn:
+    Value: !GetAtt "KinesisForwarderRole.Arn"
+    Export:
+      Name: !Sub "${AWS::StackName}::KinesisForwarderRole::Arn"
