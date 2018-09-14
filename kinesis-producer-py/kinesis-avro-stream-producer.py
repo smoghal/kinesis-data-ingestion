@@ -1,8 +1,6 @@
 # references for generating sample data:
 #   https://github.com/lk-geimfari/mimesis/blob/master/docs/quickstart.rst
 #   https://github.com/lk-geimfari/mimesis/blob/master/docs/advanced.rst
-# AVRO Streaming:
-#   https://github.com/thanhson1085/python-kafka-avro
 
 import boto3
 import io
@@ -53,17 +51,6 @@ for _ in range(0, 10):
     avro_binary_encoder = avro.io.BinaryEncoder(bytes_writer)
 
     # write binary data
-
-    # avro_writer.write(
-    #     {
-    #         "uuid": generic.cryptographic.uuid(),
-    #         "firstName": generic.person.name(),
-    #         "lastName": generic.person.surname(),
-    #         "age": generic.person.age(),
-    #         "gender": generic.person.gender(),
-    #         "email": generic.person.email(),
-    #         "address": generic.address.address()
-    #     }, avro_binary_encoder)
     avro_writer.write(user, avro_binary_encoder)
     raw_bytes = bytes_writer.getvalue()
 
