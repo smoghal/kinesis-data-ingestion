@@ -2,5 +2,7 @@ build
 deploy
 dist
 *.local
+*.public
 *-output.yaml
+*.avro
 .DS_Store

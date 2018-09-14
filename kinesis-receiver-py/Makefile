@@ -95,6 +95,3 @@ build-time-1:
 	sleep 4s
 build-time-2:
 	@echo $(build_time)
-
-
-
